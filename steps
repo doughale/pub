@@ -1,0 +1,237 @@
+------------
+Assignment
+We are looking for you to walk through the process of utilizing AWS Glue ETL jobs to ingest data from an RDS instance into an S3 bucket, and create a metastore catalog with the data as well. Required services: Amazon RDS, Glue, s3, LakeFormation. 
+
+Source engine can be of your choosing. 
+Only need a small-scale sample schema 
+
+RDS instance creation, database ddl, and any necessary permission roles can be set up prior to recording the video. For time purposes, stick to using the AWS dashboard, rather than accessing services programmatically (we do however do both in the course).
+------------
+
+1. Create VPC 
+    Name: etl-lab-vpc
+    CIDR: 10.0.0.0/24
+        range
+            start = 10.0.0.0
+            end = negated decimal form of network prefix
+                24 bit network prefix 
+                11111111.11111111.11111111.00000000
+                negate
+                00000000.00000000.00000000.11111111
+                back to decimal
+                10.0.0.0/24                
+    Enable BOTH DNS Resolution and DNS Hostnames
+    tag: project=etl-lab
+    
+    Comments
+        - Main route table is auto-created enabling traffic originating from within the VPC (target=local) 
+        to flow to the entire CIDR range (destination 10.0.0.0/24).
+
+2. Create 2 subnets for VPC etl-lab-vpc
+
+    etl-lab-vpc (10.0.0.0/24) allows 256 hosts 
+    Need 2 subnets in different AZs (requirement for RDS) split across 256 host addresses:
+        subnet 1: 
+            name: etl-lab-subnet-us-east-1a
+            AZ: us-east-1a
+            CIDR = .00000000 - .01111111 = 0-127   = 10.0.0.0/25                   
+        subnet 2: 
+            name: etl-lab-subnet-us-east-1b
+            AZ: us-east-1b
+            CIDR = .10000000 - .11111111 = 128-256 = 10.0.0.128/25               
+
+
+3.  Create Internet Gate and attach to VPC
+        Name: etl-lab-igw
+        tag: project=etl-lab
+        Actions -> Attach to VPC and choose etl-lab-vpc
+        Copy the internet gateway ID for etl-lab-igw = X
+        Edit Route Table for VPC etl-lab-vpc
+        Add Route:
+            Dest = 0.0.0.0/0	
+            Source = X
+
+4.  Create MySQL RDS
+        Standard Create
+        Free Tier template  
+        Allocated Storage: 20 (minimum)
+        Name: etl-lab-rds-mysql
+        Public Access = true
+        tag: project=etl-lab
+        Associate with VPC etl-lab-vpc
+        VPC Security Group: 
+            Choose "Create New"
+            Name: etl-lab-sg
+            tag: project=etl-lab
+
+5.   Update Security Group with Self-Referencing Rule
+        Nav to Security Groups
+        Edit inbound rules
+        Add rull to allow all TCP traffic from the security group's own id 
+
+6.   Populate MySQL RDS Baseball Database
+        Connect to MySQL
+            Open a terminal (Linux or Windows) that has mysql installed
+            Get the public IP of the RDS Mysql = X (it will look like etl-lab-rds-mysql..something...rds.amazonaws.com
+            run mysql -u admin -p -h X
+            Enter mysql password when prompted
+            Success indicated by "Welcome to the MySQL monitor" 
+        Create baseball db
+            Copy text from this url: https://raw.githubusercontent.com/doughale/Baseball/master/baseball.sql 
+            Paste the text into the mysql command prompt
+            In prompt: show tables;
+                should see .. 
+                    +--------------------+
+                    | Tables_in_baseball |
+                    +--------------------+
+                    | player             |
+                    | state              |
+                    | team               |
+                    +--------------------+
+                    3 rows in set (0.04 sec)
+
+        Exit in the
+            In prompt: quit;
+                Should see "Bye"
+        Close Terminal
+7. S3 Baseball buckets 
+    Nav to S3
+    Create a new S3 bucket
+    Name: etl-lab-s3-data
+    Region: Choose S3 region (mine is us-east-1) 
+    ** take note of this Region choice for later in step 11
+    tag: project=etl-lab
+
+8. Create S3 VPC Endpoint
+    AWS VPC -> Endpoints
+    name etl-lab-s3-ep
+    Create New
+    Choose com.amazonaws.us-east-1.s3	Gateway
+    Choose VPC named: etl-lab-vpc 
+    Choose route table (should be only 1 choice)
+    tag: project=etl-lab
+
+9. AWS Glue part 1: Role
+    Create an IAM role called: etl-lab-glue-role
+    Choose Use Case for other services: Glue
+        NOTE: This allows allows the Glue service to assume this role  
+    Then add the 23 AWS policies:
+        AmazonS3FullAccess	AWS managed	
+        AWSGlueServiceRole	AWS managed	
+        AmazonRDSDataFullAccess	AWS managed	
+    Save
+    Manage tags
+    tag: project=etl-lab
+
+10. AWS Glue part 2 : Catalog
+    Nav to AWS Glue
+    Database
+        Database->Add Database
+        Name=etl-lab-glue-baseball-db
+        Save
+        (no tag option available?)
+    MySQL Connection
+        Connections->Create New
+        name = etl-lab-glue-connection-rds-mysql
+        Connection type = Amazon RDS
+        Database engine=MySQL
+        Database instance = etl-lab-rds-mysql
+        database=baseball
+        Cred type=username and passwrd
+        username=admin
+        password=...
+    S3 Connection
+        Connections->Network
+        name = etl-lab-glue-connection-s3
+        Subnet: Choose subnet corresponding to the S3 region (mine is us-east-1)
+            ** see step 6 re: Region
+        Security group = etl-lab-sg
+    Test each connection via: Actions->Test
+
+11. AWS Glue part 3 : MySQL Crawler
+    
+    Crawlers->Create Crawler
+    name= etl-lab-glue-crawler-mysql 
+    tag: project=etl-lab
+    Next
+
+    Add Datasource
+        source of data=JDBC
+        Connection= etl-lab-glue-connection-rds-mysql
+        include path="baseball/player"
+        Click Add
+    Next
+    IAM Role = etl-lab-glue-role
+    Next
+    Target Database = etl-lab-glue-baseball-db
+    Next
+    click Create Crawler
+    Click Run Crawler
+    When Complete, view Databases->Tables to see the generated table schema: baseball_player
+
+12. AWS Glue part 4: ETL Job 
+    Visual ETL->Visual with a source and target
+    Source: AWS Glue Data Catalog
+    Destin: Amazon S3
+    Create
+    Top Node: Data Catalog Table
+        database = etl-lab-glue-baseball-db
+        table = baseball_player
+    Bottom Node: S3 bucket
+        Format = json
+        compress = none
+        s3: etl-lab-s3-baseball
+   Job Name at top: etl-lab-glue-job     
+   Job Details:
+        IAM Role: etl-lab-glue-role
+        Additional network connections: etl-lab-glue-s3
+        tag: Project=etl-lab
+    Click Save
+    Run Crawler
+    
+13. Examine raw data
+    On success, S3 etl-lab-s3-baseball will be updated with JSON data blobs
+    View in editor: 20 blobs containing 10 records each
+    Confirmed with select count(*) from player in mysql
+
+14. AWS Glue part 4 : S3 Crawler
+    Create crawler
+    Name: etl-lab-glue-crawler-s3
+    tag: Project=etl-lab
+    Next
+    Add data source
+        data source: s3
+        network conn: etl-lab-glue-s3
+        s3 path: s3://etl-lab-s3-baseball
+        Click Add s3 data source
+        select oval
+    Next
+    IAM
+        role=etl-lab-glue-role
+    Next
+        target database etl-lab-glue-baseball
+    Next
+    Create Crawler
+    Rule Crawler
+    On success, verify a new table is created: etl_lab_s3_baseball
+
+15. Athena Query
+    Create an S3 bucket for Athena queries: etl-lab-athena
+    tag: Project=etl-lab
+    Open Athena->New Query
+    set query output s3 location = etl-lab-athena 
+    Write and execute query:
+        select * from "etl-lab-glue-baseball-db"."etl_lab_s3_data
+
+
+16. Teardown
+    AWS Tag Editor
+    All regions
+    All resource types
+    Project=etl-lab
+    GO thru list and delete resources   
+    Delete the following NOT shown in tag list:
+        RDS
+        IAM Roles
+        AWS Glue Database
+        AWS Glue Connections
