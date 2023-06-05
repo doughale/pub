@@ -29,7 +29,7 @@ namespace ConsoleApp8
             Console.WriteLine("Waiting on all Tasks ..");
             Task.WaitAll(new Task[] {g3,g4,g5});
 
-            Console.WriteLine($"The 3 CountToNAwaits returned {g3.Result.ToString()}, {g3.Result.ToString()}, {g3.Result.ToString()} ");
+            Console.WriteLine($"The 3 CountToNAwaits returned {g4.Result.ToString()}, {g5.Result.ToString()}, {g6.Result.ToString()} ");
 
             Console.ReadKey();
 
