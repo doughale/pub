@@ -15,11 +15,11 @@ namespace ConsoleApp8
 
             Console.WriteLine("Calling CountToNAwait awaitable task");
             var g2 = CountToNAwait(n);
-            Console.WriteLine($"CountToNAwait returned {g2.ToString()} .. note this is a Task's tostring .. not n .. and you're going to see another thread outputing as well");
+            Console.WriteLine($"CountToNAwait returned {g2.ToString()} .. note this is a Task's tostring .. not g2 GUID return value .. and you're going to see another thread outputing as well");
 
             Console.WriteLine("Calling CountToNAwait awaitable task again");
             var g3 = CountToNAwait(n);
-            Console.WriteLine($"CountToNAwait returned {g3.Result.ToString()} .. note this n because we used .Result()");
+            Console.WriteLine($"CountToNAwait returned {g3.Result.ToString()} .. note this is g3's return value because we used .Result()");
 
             Console.WriteLine("Calling CountToNAwait awaitable task 3 times in a row .. 3 threads will be outputting simultaneously");
             var g4 = CountToNAwait(n);
